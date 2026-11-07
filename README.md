@@ -1,8 +1,8 @@
 # LedgerMatch
 
-Offline CSV reconciliation for bookkeepers and small businesses. Give it a bank export and an accounting-register export; it tells you what matches, what is only in the bank, and what is only in your books.
+Offline CSV reconciliation for bookkeepers and small businesses. Give it a bank export and an accounting-register export, in whatever layout they come in; it tells you what matches, what is only in the bank, and what is only in your books.
 
-Version 0.1 is deliberately small. Correctness of the numbers comes first.
+It is deliberately small. Correctness of the numbers comes first.
 
 ## Principles
 
@@ -11,6 +11,7 @@ Version 0.1 is deliberately small. Correctness of the numbers comes first.
 - **Descriptions are never used for matching.** "Rent" vs "Rent March" proves nothing; only date and amount count.
 - **Duplicates are flagged.** If the same date and amount appears more than once, the tool says so and asks you to review.
 - **Bad input stops the run.** Every invalid row is listed at once, and nothing is reconciled until the file is fixed.
+- **Real exports, no guessing.** Import profiles map different bank and ledger layouts, each file with its own profile, and anything ambiguous is an error rather than a guess.
 - **Offline.** No network, no accounts, no databases, no dependencies.
 
 ## How matching works
@@ -37,22 +38,34 @@ Without installing: `PYTHONPATH=src python3 -m ledgermatch sample_data/bank.csv 
 | option | meaning |
 | --- | --- |
 | `-o`, `--output-dir` | where reports go (default `ledgermatch-output`) |
+| `--bank-profile`, `--register-profile` | import profile for each file: `standard` or a `.toml` path (default `standard`) |
+| `--validate-only` | read both files, print counts and totals, write nothing |
 | `--force` | overwrite existing reports (otherwise the run refuses) |
 | `--version` | print the version |
 
 Exit code `0` means the run completed (even if some rows are unmatched, since that is a normal result). Exit code `1` means the input was unusable or reports would have been overwritten.
 
-## Input format
+## Input formats and import profiles
 
-CSV with a header row and exactly these columns, in any order and any capitalisation:
+By default LedgerMatch reads the `standard` layout: a header row with exactly `date`, `description` and `amount` (any order or capitalisation), dates as `YYYY-MM-DD`, plain numbers with negative for money out.
 
-| column | rule |
-| --- | --- |
-| `date` | `YYYY-MM-DD` |
-| `description` | any text (quote it if it contains a comma) |
-| `amount` | plain number; negative for money out, e.g. `-86.40` |
+Real exports rarely look like that, so each file can use an **import profile**: a small TOML file describing that layout (column names, date format, signed amount or separate Debit/Credit columns, title lines above the header, thousands separators, and so on). The bank and register can use different profiles in the same run:
 
-Not accepted, and reported as errors: currency symbols, thousands separators (`1,000.00`), brackets for negatives (`(5.00)`), exponents (`1e3`), other date formats, and extra columns. LedgerMatch refuses them rather than guessing.
+```bash
+ledgermatch bank_export_credit_union.csv register_export_ledger.csv \
+  --bank-profile sample_data/profiles/credit-union-signed.toml \
+  --register-profile sample_data/profiles/ledger-debit-credit.toml
+```
+
+Check a new profile before relying on it:
+
+```bash
+ledgermatch bank.csv register.csv --bank-profile my-bank.toml --register-profile my-books.toml --validate-only
+```
+
+This prints each file's transaction count, date range, and money in, money out and net totals, to compare with the statement. Two fictional exports in different layouts are in `sample_data/`. See [docs/PROFILES.md](docs/PROFILES.md) for every setting, how debits and credits are interpreted, and what is preserved.
+
+Everything is normalised to **money in positive, money out negative**. For debit/credit columns the profile must say whether a debit means money in or out; LedgerMatch will not guess.
 
 ## Example output
 
@@ -77,12 +90,12 @@ Control totals let you prove nothing was lost: matched (12983.13) plus bank-only
 `bank_only.csv`:
 
 ```
-date,description,amount,line,review
-2026-03-04,Coffee,-4.50,5,"review: bank has 2, register has 1 with this date and amount"
-2026-03-05,Bank service fee,-15.00,6,
+date,description,amount,line,review,original
+2026-03-04,Coffee,-4.50,6,"review: bank has 2, register has 1 with this date and amount","{""date"": ""2026-03-04"", ""description"": ""Coffee"", ""amount"": ""-4.50""}"
+2026-03-05,Bank service fee,-15.00,7,,"{""date"": ""2026-03-05"", ""description"": ""Bank service fee"", ""amount"": ""-15.00""}"
 ```
 
-`line` is the row's line number in your original file.
+`line` is the row's line number in your original file, and `original` holds the complete original row as JSON (including columns LedgerMatch does not use), so nothing from the input is lost. Reports always show dates as `YYYY-MM-DD`, whatever format the input used.
 
 An invalid file looks like this:
 
@@ -100,10 +113,10 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 
 All sample and test data is fictional.
 
-## Current limitations (version 0.1)
+## Current limitations
 
 - Exact date and exact amount only; no tolerance for a bank posting a day late.
-- Two files, one currency, fixed column names and date format.
+- Two files, one currency. No `DR`/`CR` type column and no footer rows (see [docs/PROFILES.md](docs/PROFILES.md)).
 - Whole files are read into memory.
 - Matching one-to-one only; one bank deposit covering several invoices will not match.
 - Reports are CSV only.

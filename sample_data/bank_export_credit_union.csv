@@ -1,0 +1,11 @@
+Fictional Credit Union - Account Export
+Account: Business Checking (sample data)
+Posting Date,Payee,Memo,Amount,Running Balance
+03/01/2026,Opening deposit,Initial funding,"10,000.00","10,000.00"
+03/02/2026,Acme Co,Invoice payment,"2,500.00","12,500.00"
+03/03/2026,Landlord LLC,March rent,"-1,800.00","10,700.00"
+03/04/2026,Corner Cafe,Coffee,-4.50,"10,695.50"
+03/04/2026,Corner Cafe,Coffee,-4.50,"10,691.00"
+03/05/2026,Credit Union,Service fee,-15.00,"10,676.00"
+03/06/2026,Birch Inc,Invoice payment,"2,500.00","13,176.00"
+03/09/2026,Power Co,Utilities,-212.37,"12,963.63"

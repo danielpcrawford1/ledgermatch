@@ -1,0 +1,8 @@
+Date,Num,Name,Memo,Debit,Credit,Balance
+01-Mar-2026,JE-1,Owner,Initial funding,"10,000.00",,"10,000.00"
+02-Mar-2026,2001,Acme Co,Invoice 2001 payment,"2,500.00",,"12,500.00"
+03-Mar-2026,CK-101,Landlord LLC,Rent March,,"1,800.00","10,700.00"
+04-Mar-2026,CK-102,Corner Cafe,Team coffee,,4.50,"10,695.50"
+06-Mar-2026,2002,Birch Inc,Invoice 2002 payment,"2,500.00",,"13,195.50"
+08-Mar-2026,CK-103,Insurance Agency,Insurance premium,,340.00,"12,855.50"
+09-Mar-2026,CK-104,Power Co,Electric bill,,212.37,"12,643.13"

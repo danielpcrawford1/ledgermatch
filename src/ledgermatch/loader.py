@@ -1,4 +1,4 @@
-"""Reads CSV files into Transactions.
+"""Reads CSV files into Transactions, following an import profile.
 
 Two kinds of problems are handled differently:
 
@@ -7,23 +7,22 @@ Two kinds of problems are handled differently:
 * A problem with one row (bad date, bad amount, wrong column count) is recorded
   as a RowProblem and loading continues, so the user sees every bad row at once
   instead of fixing them one at a time. No row is ever dropped silently.
+
+Every transaction keeps the complete original row in `Transaction.original`.
 """
 
 import csv
-import re
 from dataclasses import dataclass, field
-from datetime import date
-from decimal import Decimal
 from pathlib import Path
 
 from ledgermatch.models import Transaction
-
-REQUIRED_COLUMNS = ("date", "description", "amount")
-
-# Strict formats. Python's own parsers are more forgiving than we want:
-# date.fromisoformat accepts "20260105" and Decimal accepts "1e3" or "NaN".
-_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
-_AMOUNT_PATTERN = re.compile(r"-?\d+(\.\d+)?")
+from ledgermatch.normalize import (
+    NormalizationError,
+    parse_date,
+    parse_debit_credit,
+    parse_signed_amount,
+)
+from ledgermatch.profiles import STANDARD, Profile
 
 
 class InputFileError(Exception):
@@ -46,36 +45,19 @@ class LoadResult:
     problems: list[RowProblem] = field(default_factory=list)
 
 
-def _parse_date(text: str) -> date | str:
-    """Return a date, or an error message string."""
-    cleaned = text.strip()
-    if _DATE_PATTERN.fullmatch(cleaned):
-        try:
-            return date.fromisoformat(cleaned)
-        except ValueError:
-            pass  # right shape, impossible date such as 2026-02-30
-    return f"invalid date {text!r}; use YYYY-MM-DD, for example 2026-01-31"
-
-
-def _parse_amount(text: str) -> Decimal | str:
-    """Return a Decimal, or an error message string."""
-    cleaned = text.strip()
-    if _AMOUNT_PATTERN.fullmatch(cleaned):
-        return Decimal(cleaned)
-    return (
-        f"invalid amount {text!r}; use a plain number such as 12.50 or -3.00 "
-        "(no currency symbols, thousands separators, brackets or exponents)"
-    )
-
-
-def load_transactions(path: str | Path) -> LoadResult:
-    """Read one CSV file. See the module docstring for error handling."""
+def load_transactions(path: str | Path, profile: Profile = STANDARD) -> LoadResult:
+    """Read one CSV file using `profile`. See the module docstring for error handling."""
     path = Path(path)
     source = str(path)
     try:
-        # utf-8-sig removes the invisible marker Excel puts at the start of CSVs.
-        with path.open(newline="", encoding="utf-8-sig") as handle:
-            return _read(csv.reader(handle, strict=True), source)
+        # The default encoding, utf-8-sig, removes the invisible marker Excel
+        # puts at the start of CSV files.
+        with path.open(newline="", encoding=profile.encoding) as handle:
+            for _ in range(profile.skip_rows):  # report titles before the header
+                if not handle.readline():
+                    break
+            reader = csv.reader(handle, delimiter=profile.delimiter, strict=True)
+            return _read(reader, source, profile)
     except FileNotFoundError:
         raise InputFileError(f"{source}: file not found.") from None
     except IsADirectoryError:
@@ -84,11 +66,14 @@ def load_transactions(path: str | Path) -> LoadResult:
         raise InputFileError(f"{source}: no permission to read this file.") from None
     except UnicodeDecodeError:
         raise InputFileError(
-            f"{source}: not readable as UTF-8 text. Is it really a CSV file?"
+            f"{source}: not readable as {profile.encoding} text (profile "
+            f"{profile.name!r}). Is it really a CSV file, and is the profile's "
+            "encoding right?"
         ) from None
 
 
-def _read(reader, source: str) -> LoadResult:
+def _read(reader, source: str, profile: Profile) -> LoadResult:
+    offset = profile.skip_rows
     try:
         header = next(reader, None)
     except csv.Error as exc:
@@ -97,26 +82,36 @@ def _read(reader, source: str) -> LoadResult:
         raise InputFileError(f"{source}: file is empty (no header row).")
 
     names = [name.strip().lower() for name in header]
-    missing = [col for col in REQUIRED_COLUMNS if col not in names]
+    wanted = [name.strip().lower() for name in profile.mapped_columns()]
+    missing = [orig for orig, key in zip(profile.mapped_columns(), wanted) if key not in names]
     if missing:
         raise InputFileError(
-            f"{source}: missing required column(s): {', '.join(missing)}. "
-            f"Expected header: {','.join(REQUIRED_COLUMNS)}."
+            f"{source}: missing required column(s) for profile {profile.name!r}: "
+            f"{', '.join(missing)}. Header found: {', '.join(h.strip() for h in header)}."
         )
-    unexpected = [name for name in names if name not in REQUIRED_COLUMNS]
-    if unexpected:
+    repeated = sorted({key for key in wanted if names.count(key) > 1})
+    if repeated:
         raise InputFileError(
-            f"{source}: unexpected column(s): {', '.join(unexpected)}. Version 0.1 "
-            f"accepts only {','.join(REQUIRED_COLUMNS)}; extra columns are refused "
-            "rather than silently ignored."
+            f"{source}: duplicate column name(s) in the header: {', '.join(repeated)}."
         )
-    if len(set(names)) != len(names):
-        raise InputFileError(f"{source}: duplicate column names in the header.")
-    index = {col: names.index(col) for col in REQUIRED_COLUMNS}
+    if profile.extra_columns == "error":
+        unexpected = [h.strip() for h, n in zip(header, names) if n not in wanted]
+        if unexpected:
+            raise InputFileError(
+                f"{source}: unexpected column(s): {', '.join(unexpected)}. Profile "
+                f"{profile.name!r} accepts only: {', '.join(profile.mapped_columns())}. "
+                "Extra columns are refused rather than silently ignored; a custom "
+                "profile can keep them."
+            )
+    index = {key: names.index(key) for key in wanted}
+    keys = _unique_keys(header)
+
+    def column(row: list[str], name: str) -> str:
+        return row[index[name.strip().lower()]]
 
     result = LoadResult()
     while True:
-        start_line = reader.line_num + 1  # a quoted field can span several lines
+        start_line = reader.line_num + 1 + offset  # a quoted field can span lines
         try:
             row = next(reader)
         except StopIteration:
@@ -129,29 +124,54 @@ def _read(reader, source: str) -> LoadResult:
             continue
         if len(row) != len(names):
             result.problems.append(
-                RowProblem(
-                    source, start_line,
-                    f"expected {len(names)} columns but found {len(row)}",
-                )
+                RowProblem(source, start_line,
+                           f"expected {len(names)} columns but found {len(row)}")
             )
             continue
 
-        raw_date, description, raw_amount = (
-            row[index["date"]], row[index["description"]], row[index["amount"]],
-        )
-        parsed_date = _parse_date(raw_date)
-        parsed_amount = _parse_amount(raw_amount)
-        row_ok = True
-        for parsed in (parsed_date, parsed_amount):
-            if isinstance(parsed, str):
-                result.problems.append(RowProblem(source, start_line, parsed))
-                row_ok = False
-        if row_ok:
-            result.transactions.append(
-                Transaction(
-                    source=source, line=start_line, date=parsed_date,
-                    description=description, amount=parsed_amount,
-                    raw_date=raw_date.strip(), raw_amount=raw_amount.strip(),
+        problems = []
+        parsed_date = amount = None
+        try:
+            parsed_date = parse_date(column(row, profile.date_column), profile)
+        except NormalizationError as exc:
+            problems.append(str(exc))
+        try:
+            if profile.uses_debit_credit:
+                amount = parse_debit_credit(
+                    column(row, profile.debit_column), column(row, profile.credit_column), profile
                 )
+            else:
+                amount = parse_signed_amount(column(row, profile.amount_column), profile)
+        except NormalizationError as exc:
+            problems.append(str(exc))
+        if problems:
+            result.problems.extend(RowProblem(source, start_line, p) for p in problems)
+            continue
+
+        parts = [column(row, name) for name in profile.description_columns]
+        # One description column is kept exactly; several are joined for display
+        # (the originals stay in `original`).
+        description = parts[0] if len(parts) == 1 else " - ".join(
+            p.strip() for p in parts if p.strip()
+        )
+        result.transactions.append(
+            Transaction(
+                source=source, line=start_line, date=parsed_date,
+                description=description, amount=amount.value,
+                raw_date=column(row, profile.date_column).strip(),
+                amount_text=amount.text, original=tuple(zip(keys, row)),
             )
+        )
     return result
+
+
+def _unique_keys(header: list[str]) -> list[str]:
+    """Header names usable as unique labels, even for blank or repeated headers."""
+    keys, seen = [], set()
+    for position, name in enumerate(header, start=1):
+        key = name.strip() or f"(column {position})"
+        if key in seen:
+            key = f"{key} (column {position})"
+        seen.add(key)
+        keys.append(key)
+    return keys

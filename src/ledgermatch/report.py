@@ -1,10 +1,12 @@
 """Turns a ReconciliationResult into a terminal summary and CSV files.
 
-Nothing here changes the reconciliation. Dates and amounts are written exactly
-as they appeared in the input.
+Nothing here changes the reconciliation. Dates are written as YYYY-MM-DD so
+reports look the same whatever format the input used; amounts keep the digits
+from the file; and an `original` column holds the complete source row as JSON.
 """
 
 import csv
+import json
 from decimal import Decimal
 from pathlib import Path
 
@@ -35,7 +37,18 @@ def _note(result: ReconciliationResult, txn: Transaction) -> str:
     )
 
 
-def format_summary(result: ReconciliationResult) -> str:
+def _original(txn: Transaction) -> str:
+    """The untouched source row as JSON, so nothing from the input file is lost."""
+    return json.dumps(dict(txn.original), ensure_ascii=False)
+
+
+def _profile_note(name: str) -> str:
+    return f"  (profile: {name})" if name else ""
+
+
+def format_summary(
+    result: ReconciliationResult, bank_profile: str = "", register_profile: str = ""
+) -> str:
     bank_matched = [m.bank for m in result.matches]
     register_matched = [m.register for m in result.matches]
     bank_rows = len(bank_matched) + len(result.bank_only)
@@ -46,8 +59,10 @@ def format_summary(result: ReconciliationResult) -> str:
     lines = [
         "LedgerMatch reconciliation summary",
         "==================================",
-        f"Bank file:      {bank_rows} rows, total {_fmt(bank_total)}",
-        f"Register file:  {register_rows} rows, total {_fmt(register_total)}",
+        f"Bank file:      {bank_rows} rows, total {_fmt(bank_total)}"
+        f"{_profile_note(bank_profile)}",
+        f"Register file:  {register_rows} rows, total {_fmt(register_total)}"
+        f"{_profile_note(register_profile)}",
         "",
         f"Matched:            {len(result.matches)} pairs, "
         f"total {_fmt(_total(bank_matched))}",
@@ -91,21 +106,43 @@ def write_reports(
         writer = csv.writer(handle)
         writer.writerow(
             ["date", "amount", "bank_description", "register_description",
-             "bank_line", "register_line", "review"]
+             "bank_line", "register_line", "review", "bank_original", "register_original"]
         )
         for m in result.matches:
             writer.writerow(
-                [m.bank.raw_date, m.bank.raw_amount, m.bank.description,
+                [m.bank.date.isoformat(), m.bank.amount_text, m.bank.description,
                  m.register.description, m.bank.line, m.register.line,
-                 _note(result, m.bank) if m.ambiguous else ""]
+                 _note(result, m.bank) if m.ambiguous else "",
+                 _original(m.bank), _original(m.register)]
             )
 
     for path, rows in ((paths[1], result.bank_only), (paths[2], result.register_only)):
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["date", "description", "amount", "line", "review"])
+            writer.writerow(["date", "description", "amount", "line", "review", "original"])
             for t in rows:
                 writer.writerow(
-                    [t.raw_date, t.description, t.raw_amount, t.line, _note(result, t)]
+                    [t.date.isoformat(), t.description, t.amount_text, t.line,
+                     _note(result, t), _original(t)]
                 )
     return paths
+
+
+def format_validation(label: str, profile_name: str, transactions: list[Transaction]) -> str:
+    """One-file check report for --validate-only: counts, date range, control totals.
+
+    Compare these figures with the bank statement or ledger before trusting a
+    profile.
+    """
+    head = f"{label} (profile: {profile_name}): {len(transactions)} transactions"
+    if not transactions:
+        return head
+    money_in = sum((t.amount for t in transactions if t.amount > 0), Decimal(0))
+    money_out = sum((t.amount for t in transactions if t.amount < 0), Decimal(0))
+    first = min(t.date for t in transactions).isoformat()
+    last = max(t.date for t in transactions).isoformat()
+    return (
+        f"{head}\n  dates {first} to {last}\n"
+        f"  money in  {_fmt(money_in)}\n  money out {_fmt(money_out)}\n"
+        f"  net       {_fmt(money_in + money_out)}"
+    )
