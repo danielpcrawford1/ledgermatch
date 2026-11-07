@@ -1,0 +1,19 @@
+# A bank export with ONE signed Amount column (deposits positive, withdrawals
+# negative), US-style dates, two title lines above the header, and extra
+# columns (Running Balance) that LedgerMatch keeps but does not use.
+name = "credit-union-signed"
+description = "Fictional credit union export: signed Amount column, MM/DD/YYYY dates."
+
+[file]
+skip_rows = 2            # the two title lines before the header row
+
+[columns]
+date = "Posting Date"
+description = ["Payee", "Memo"]   # joined for display; both kept in the reports
+amount = "Amount"
+
+[dates]
+format = "%m/%d/%Y"
+
+[amounts]
+thousands_separator = ","

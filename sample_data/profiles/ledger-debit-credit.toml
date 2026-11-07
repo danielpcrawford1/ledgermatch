@@ -1,0 +1,20 @@
+# An accounting-register export with separate Debit and Credit columns.
+#
+# This register is the CASH account, so a Debit increases cash (money in) and a
+# Credit decreases it (money out). Banks use the opposite wording, which is why
+# LedgerMatch makes you state the meaning explicitly instead of guessing.
+name = "ledger-debit-credit"
+description = "Fictional register export: Debit/Credit columns, DD-Mon-YYYY dates."
+
+[columns]
+date = "Date"
+description = ["Name", "Memo"]
+debit = "Debit"
+credit = "Credit"
+
+[dates]
+format = "%d-%b-%Y"
+
+[amounts]
+debit_means = "money-in"
+thousands_separator = ","

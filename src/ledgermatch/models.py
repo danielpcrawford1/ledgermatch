@@ -13,9 +13,10 @@ from decimal import Decimal
 class Transaction:
     """One row from an input file.
 
-    `raw_date` and `raw_amount` keep the text exactly as it appeared in the
-    file. Reports print the raw text, so the tool never rewrites your data
-    (for example, "10.10" stays "10.10", not "10.1").
+    `date`, `amount` and `description` are the normalised values used for
+    matching. `original` keeps the untouched source row, and `amount_text`
+    keeps the digits exactly as written (for example "10.10" stays "10.10",
+    never "10.1"), so the tool never rewrites your data.
     """
 
     source: str  # which file it came from
@@ -23,8 +24,12 @@ class Transaction:
     date: date
     description: str
     amount: Decimal
-    raw_date: str
-    raw_amount: str
+    raw_date: str  # the date text exactly as in the file (surrounding spaces removed)
+    amount_text: str  # the amount as plain text, e.g. "-1800.50"; see normalize.py
+    # Every column of the source row, exactly as read: ((header, value), ...).
+    # Reports include it so nothing from the original file is lost, including
+    # columns LedgerMatch does not use (balances, reference numbers, ...).
+    original: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

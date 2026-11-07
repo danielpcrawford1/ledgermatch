@@ -52,11 +52,11 @@ class ValidFiles(TempDirCase):
         result = load_transactions(self.write("a.csv", HEADER + "2026-02-03,Rent,-1800.50 \n"))
         t = result.transactions[0]
         self.assertEqual((t.date, t.amount, t.line), (date(2026, 2, 3), Decimal("-1800.50"), 2))
-        self.assertEqual((t.raw_date, t.raw_amount), ("2026-02-03", "-1800.50"))
+        self.assertEqual((t.raw_date, t.amount_text), ("2026-02-03", "-1800.50"))
 
     def test_trailing_zeros_kept_in_raw_text(self):
         t = load_transactions(self.write("z.csv", HEADER + "2026-01-01,a,10.10\n")).transactions[0]
-        self.assertEqual(t.raw_amount, "10.10")
+        self.assertEqual(t.amount_text, "10.10")
 
     def test_column_order_and_case_do_not_matter(self):
         result = load_transactions(self.write("o.csv", "Amount,DATE,Description\n1.50,2026-02-03,x\n"))

@@ -13,7 +13,7 @@ def txn(day, amount, description="x", source="t.csv", line=2):
     """Build a Transaction quickly. `day` is 'YYYY-MM-DD', `amount` a string."""
     return Transaction(
         source=source, line=line, date=date.fromisoformat(day),
-        description=description, amount=Decimal(amount), raw_date=day, raw_amount=amount,
+        description=description, amount=Decimal(amount), raw_date=day, amount_text=amount,
     )
 
 
