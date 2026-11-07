@@ -1,0 +1,9 @@
+date,description,amount
+2026-03-01,Opening deposit,10000.00
+2026-03-02,Customer payment - Acme,2500.00
+2026-03-03,Office rent,-1800.00
+2026-03-04,Coffee,-4.50
+2026-03-04,Coffee,-4.50
+2026-03-05,Bank service fee,-15.00
+2026-03-06,Customer payment - Birch,2500.00
+2026-03-09,Utilities,-212.37
